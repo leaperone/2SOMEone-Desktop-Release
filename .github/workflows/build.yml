@@ -103,13 +103,18 @@ jobs:
 
       - name: Prepare yml for latest
         run: |
-          # 复制 yml 文件为 latest-mac.yml
-          for yml in release/*-mac.yml; do
-            if [ -f "$yml" ]; then
-              cp "$yml" release/latest-mac.yml
-              break
-            fi
-          done
+          # 确保有 latest-mac.yml 文件
+          # 如果已经存在就跳过，否则从其他 *-mac.yml 复制
+          if [ ! -f "release/latest-mac.yml" ]; then
+            for yml in release/*-mac.yml; do
+              if [ -f "$yml" ]; then
+                cp "$yml" release/latest-mac.yml
+                break
+              fi
+            done
+          fi
+          echo "Contents of release directory:"
+          ls -la release/
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -157,14 +162,18 @@ jobs:
       - name: Prepare yml for latest
         shell: bash
         run: |
-          # 复制 yml 文件为 latest.yml
-          for yml in release/*.yml; do
-            filename=$(basename "$yml")
-            if [[ "$filename" != "builder-debug.yml" && "$filename" != "latest.yml" ]]; then
-              cp "$yml" release/latest.yml
-              break
-            fi
-          done
+          # 确保有 latest.yml 文件
+          if [ ! -f "release/latest.yml" ]; then
+            for yml in release/*.yml; do
+              filename=$(basename "$yml")
+              if [[ "$filename" != "builder-debug.yml" && "$filename" != "latest.yml" ]]; then
+                cp "$yml" release/latest.yml
+                break
+              fi
+            done
+          fi
+          echo "Contents of release directory:"
+          ls -la release/
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -210,13 +219,17 @@ jobs:
 
       - name: Prepare yml for latest
         run: |
-          # 复制 yml 文件为 latest-linux.yml
-          for yml in release/*-linux.yml; do
-            if [ -f "$yml" ]; then
-              cp "$yml" release/latest-linux.yml
-              break
-            fi
-          done
+          # 确保有 latest-linux.yml 文件
+          if [ ! -f "release/latest-linux.yml" ]; then
+            for yml in release/*-linux.yml; do
+              if [ -f "$yml" ]; then
+                cp "$yml" release/latest-linux.yml
+                break
+              fi
+            done
+          fi
+          echo "Contents of release directory:"
+          ls -la release/
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
