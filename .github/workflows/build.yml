@@ -108,15 +108,23 @@ jobs:
       - name: Install AWS CLI
         run: brew install awscli
 
-      - name: Upload to S3
+      - name: Rename yml to latest and upload to S3
         run: |
           # 配置 AWS CLI for Bitiful S3
           aws configure set aws_access_key_id ${{ secrets.BITIFUL_ACCESS_KEY_ID }}
           aws configure set aws_secret_access_key ${{ secrets.BITIFUL_SECRET_ACCESS_KEY }}
           aws configure set default.region cn-east-1
 
+          # 重命名 yml 文件为 latest-mac.yml
+          for yml in release/*-mac.yml; do
+            if [ -f "$yml" ]; then
+              cp "$yml" release/latest-mac.yml
+              break
+            fi
+          done
+
           # 上传文件到 S3
-          for file in release/*.dmg release/*.zip release/*.yml release/*.blockmap; do
+          for file in release/*.dmg release/*.zip release/latest-mac.yml release/*.blockmap; do
             if [ -f "$file" ]; then
               filename=$(basename "$file")
               echo "Uploading $filename..."
@@ -174,7 +182,7 @@ jobs:
         shell: bash
         run: pip install awscli
 
-      - name: Upload to S3
+      - name: Rename yml to latest and upload to S3
         shell: bash
         run: |
           # 配置 AWS CLI for Bitiful S3
@@ -182,8 +190,18 @@ jobs:
           aws configure set aws_secret_access_key ${{ secrets.BITIFUL_SECRET_ACCESS_KEY }}
           aws configure set default.region cn-east-1
 
+          # 重命名 yml 文件为 latest.yml (Windows 不带 -win 后缀)
+          for yml in release/*.yml; do
+            filename=$(basename "$yml")
+            # 跳过 builder-debug.yml
+            if [[ "$filename" != "builder-debug.yml" && "$filename" != "latest.yml" ]]; then
+              cp "$yml" release/latest.yml
+              break
+            fi
+          done
+
           # 上传文件到 S3
-          for file in release/*.exe release/*.yml release/*.blockmap; do
+          for file in release/*.exe release/latest.yml release/*.blockmap; do
             if [ -f "$file" ]; then
               filename=$(basename "$file")
               echo "Uploading $filename..."
@@ -239,15 +257,23 @@ jobs:
       - name: Install AWS CLI
         run: pip install awscli
 
-      - name: Upload to S3
+      - name: Rename yml to latest and upload to S3
         run: |
           # 配置 AWS CLI for Bitiful S3
           aws configure set aws_access_key_id ${{ secrets.BITIFUL_ACCESS_KEY_ID }}
           aws configure set aws_secret_access_key ${{ secrets.BITIFUL_SECRET_ACCESS_KEY }}
           aws configure set default.region cn-east-1
 
+          # 重命名 yml 文件为 latest-linux.yml
+          for yml in release/*-linux.yml; do
+            if [ -f "$yml" ]; then
+              cp "$yml" release/latest-linux.yml
+              break
+            fi
+          done
+
           # 上传文件到 S3
-          for file in release/*.AppImage release/*.deb release/*.yml; do
+          for file in release/*.AppImage release/*.deb release/latest-linux.yml; do
             if [ -f "$file" ]; then
               filename=$(basename "$file")
               echo "Uploading $filename..."
