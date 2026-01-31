@@ -28,11 +28,6 @@ on:
 
 env:
   SOURCE_REPO: leaperone/2SOMEone-Desktop
-  AWS_ACCESS_KEY_ID: ${{ secrets.BITIFUL_ACCESS_KEY_ID }}
-  AWS_SECRET_ACCESS_KEY: ${{ secrets.BITIFUL_SECRET_ACCESS_KEY }}
-  BITIFUL_BUCKET: 2someone-web-static
-  BITIFUL_ENDPOINT: https://s3.bitiful.net
-  BITIFUL_REGION: cn-east-1
 
 jobs:
   # 准备构建参数
@@ -73,6 +68,7 @@ jobs:
           echo "Building version: ${VERSION}"
           echo "Platforms: ${PLATFORMS}"
 
+  # ============ 构建阶段 ============
   build-mac:
     needs: prepare
     if: needs.prepare.outputs.build_mac == 'true'
@@ -102,36 +98,16 @@ jobs:
       - name: Build TypeScript
         run: pnpm build
 
-      - name: Build macOS (without S3 publish)
+      - name: Build macOS
         run: npx electron-builder --mac --publish never
 
-      - name: Install AWS CLI
-        run: brew install awscli
-
-      - name: Rename yml to latest and upload to S3
+      - name: Prepare yml for latest
         run: |
-          # 配置 AWS CLI for Bitiful S3
-          aws configure set aws_access_key_id ${{ secrets.BITIFUL_ACCESS_KEY_ID }}
-          aws configure set aws_secret_access_key ${{ secrets.BITIFUL_SECRET_ACCESS_KEY }}
-          aws configure set default.region cn-east-1
-
-          # 重命名 yml 文件为 latest-mac.yml
+          # 复制 yml 文件为 latest-mac.yml
           for yml in release/*-mac.yml; do
             if [ -f "$yml" ]; then
               cp "$yml" release/latest-mac.yml
               break
-            fi
-          done
-
-          # 上传文件到 S3
-          for file in release/*.dmg release/*.zip release/latest-mac.yml release/*.blockmap; do
-            if [ -f "$file" ]; then
-              filename=$(basename "$file")
-              echo "Uploading $filename..."
-              aws s3 cp "$file" "s3://2someone-web-static/release/2someone-desktop/$filename" \
-                --endpoint-url https://s3.bitiful.net \
-                --acl public-read \
-                --no-verify-ssl
             fi
           done
 
@@ -142,7 +118,7 @@ jobs:
           path: |
             release/*.dmg
             release/*.zip
-            release/*.yml
+            release/latest-mac.yml
             release/*.blockmap
           retention-days: 7
 
@@ -175,40 +151,18 @@ jobs:
       - name: Build TypeScript
         run: pnpm build
 
-      - name: Build Windows (without S3 publish)
+      - name: Build Windows
         run: npx electron-builder --win --publish never
 
-      - name: Install AWS CLI
-        shell: bash
-        run: pip install awscli
-
-      - name: Rename yml to latest and upload to S3
+      - name: Prepare yml for latest
         shell: bash
         run: |
-          # 配置 AWS CLI for Bitiful S3
-          aws configure set aws_access_key_id ${{ secrets.BITIFUL_ACCESS_KEY_ID }}
-          aws configure set aws_secret_access_key ${{ secrets.BITIFUL_SECRET_ACCESS_KEY }}
-          aws configure set default.region cn-east-1
-
-          # 重命名 yml 文件为 latest.yml (Windows 不带 -win 后缀)
+          # 复制 yml 文件为 latest.yml
           for yml in release/*.yml; do
             filename=$(basename "$yml")
-            # 跳过 builder-debug.yml
             if [[ "$filename" != "builder-debug.yml" && "$filename" != "latest.yml" ]]; then
               cp "$yml" release/latest.yml
               break
-            fi
-          done
-
-          # 上传文件到 S3
-          for file in release/*.exe release/latest.yml release/*.blockmap; do
-            if [ -f "$file" ]; then
-              filename=$(basename "$file")
-              echo "Uploading $filename..."
-              aws s3 cp "$file" "s3://2someone-web-static/release/2someone-desktop/$filename" \
-                --endpoint-url https://s3.bitiful.net \
-                --acl public-read \
-                --no-verify-ssl
             fi
           done
 
@@ -218,7 +172,7 @@ jobs:
           name: win-builds
           path: |
             release/*.exe
-            release/*.yml
+            release/latest.yml
             release/*.blockmap
           retention-days: 7
 
@@ -251,36 +205,16 @@ jobs:
       - name: Build TypeScript
         run: pnpm build
 
-      - name: Build Linux (without S3 publish)
+      - name: Build Linux
         run: npx electron-builder --linux --publish never
 
-      - name: Install AWS CLI
-        run: pip install awscli
-
-      - name: Rename yml to latest and upload to S3
+      - name: Prepare yml for latest
         run: |
-          # 配置 AWS CLI for Bitiful S3
-          aws configure set aws_access_key_id ${{ secrets.BITIFUL_ACCESS_KEY_ID }}
-          aws configure set aws_secret_access_key ${{ secrets.BITIFUL_SECRET_ACCESS_KEY }}
-          aws configure set default.region cn-east-1
-
-          # 重命名 yml 文件为 latest-linux.yml
+          # 复制 yml 文件为 latest-linux.yml
           for yml in release/*-linux.yml; do
             if [ -f "$yml" ]; then
               cp "$yml" release/latest-linux.yml
               break
-            fi
-          done
-
-          # 上传文件到 S3
-          for file in release/*.AppImage release/*.deb release/latest-linux.yml; do
-            if [ -f "$file" ]; then
-              filename=$(basename "$file")
-              echo "Uploading $filename..."
-              aws s3 cp "$file" "s3://2someone-web-static/release/2someone-desktop/$filename" \
-                --endpoint-url https://s3.bitiful.net \
-                --acl public-read \
-                --no-verify-ssl
             fi
           done
 
@@ -291,9 +225,10 @@ jobs:
           path: |
             release/*.AppImage
             release/*.deb
-            release/*.yml
+            release/latest-linux.yml
           retention-days: 7
 
+  # ============ 发布阶段 ============
   create-release:
     needs: [prepare, build-mac, build-win, build-linux]
     if: always() && (needs.build-mac.result == 'success' || needs.build-win.result == 'success' || needs.build-linux.result == 'success')
@@ -322,3 +257,46 @@ jobs:
             artifacts/**/*.deb
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ============ S3 同步阶段 ============
+  upload-to-s3:
+    needs: [prepare, create-release]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: List files to upload
+        run: find artifacts -type f
+
+      - name: Install AWS CLI
+        run: pip install awscli
+
+      - name: Upload to S3
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.BITIFUL_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.BITIFUL_SECRET_ACCESS_KEY }}
+        run: |
+          # 配置 AWS CLI for Bitiful S3
+          aws configure set aws_access_key_id $AWS_ACCESS_KEY_ID
+          aws configure set aws_secret_access_key $AWS_SECRET_ACCESS_KEY
+          aws configure set default.region cn-east-1
+
+          # 上传所有文件到 S3
+          find artifacts -type f \( -name "*.dmg" -o -name "*.zip" -o -name "*.exe" -o -name "*.AppImage" -o -name "*.deb" -o -name "latest*.yml" -o -name "*.blockmap" \) | while read file; do
+            filename=$(basename "$file")
+            echo "Uploading $filename..."
+            aws s3 cp "$file" "s3://2someone-web-static/release/2someone-desktop/$filename" \
+              --endpoint-url https://s3.bitiful.net \
+              --acl public-read \
+              --no-verify-ssl
+          done
+
+      - name: Verify S3 upload
+        run: |
+          echo "Verifying uploads..."
+          curl -sI "https://static.2some.ren/release/2someone-desktop/latest-mac.yml" | head -1 || echo "latest-mac.yml not found"
+          curl -sI "https://static.2some.ren/release/2someone-desktop/latest.yml" | head -1 || echo "latest.yml not found"
+          curl -sI "https://static.2some.ren/release/2someone-desktop/latest-linux.yml" | head -1 || echo "latest-linux.yml not found"
