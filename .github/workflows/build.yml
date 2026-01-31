@@ -83,6 +83,7 @@ jobs:
         with:
           repository: ${{ env.SOURCE_REPO }}
           ref: v${{ needs.prepare.outputs.version }}
+          token: ${{ secrets.SOURCE_REPO_TOKEN }}
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v2
@@ -125,6 +126,7 @@ jobs:
         with:
           repository: ${{ env.SOURCE_REPO }}
           ref: v${{ needs.prepare.outputs.version }}
+          token: ${{ secrets.SOURCE_REPO_TOKEN }}
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v2
@@ -166,6 +168,7 @@ jobs:
         with:
           repository: ${{ env.SOURCE_REPO }}
           ref: v${{ needs.prepare.outputs.version }}
+          token: ${{ secrets.SOURCE_REPO_TOKEN }}
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v2
