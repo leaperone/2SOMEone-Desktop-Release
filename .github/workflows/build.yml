@@ -33,9 +33,6 @@ env:
   BITIFUL_BUCKET: 2someone-web-static
   BITIFUL_ENDPOINT: https://s3.bitiful.net
   BITIFUL_REGION: cn-east-1
-  # 禁用 S3 分片上传，使用单次上传避免 MD5 校验问题
-  # 设置为 5GB，确保所有文件都使用单次上传
-  AWS_S3_FORCE_PATH_STYLE: true
 
 jobs:
   # 准备构建参数
@@ -80,9 +77,6 @@ jobs:
     needs: prepare
     if: needs.prepare.outputs.build_mac == 'true'
     runs-on: macos-latest
-    env:
-      # 设置大的分片阈值，强制单次上传
-      DEBUG: electron-builder
     steps:
       - name: Checkout source repo
         uses: actions/checkout@v4
@@ -111,17 +105,17 @@ jobs:
       - name: Build macOS (without S3 publish)
         run: npx electron-builder --mac --publish never
 
-      - name: Upload to S3 manually
-        run: |
-          # 安装 AWS CLI
-          pip3 install awscli
+      - name: Install AWS CLI
+        run: brew install awscli
 
+      - name: Upload to S3
+        run: |
           # 配置 AWS CLI for Bitiful S3
           aws configure set aws_access_key_id ${{ secrets.BITIFUL_ACCESS_KEY_ID }}
           aws configure set aws_secret_access_key ${{ secrets.BITIFUL_SECRET_ACCESS_KEY }}
           aws configure set default.region cn-east-1
 
-          # 上传文件到 S3（禁用分片上传）
+          # 上传文件到 S3
           for file in release/*.dmg release/*.zip release/*.yml release/*.blockmap; do
             if [ -f "$file" ]; then
               filename=$(basename "$file")
@@ -176,12 +170,13 @@ jobs:
       - name: Build Windows (without S3 publish)
         run: npx electron-builder --win --publish never
 
-      - name: Upload to S3 manually
+      - name: Install AWS CLI
+        shell: bash
+        run: pip install awscli
+
+      - name: Upload to S3
         shell: bash
         run: |
-          # 安装 AWS CLI
-          pip3 install awscli
-
           # 配置 AWS CLI for Bitiful S3
           aws configure set aws_access_key_id ${{ secrets.BITIFUL_ACCESS_KEY_ID }}
           aws configure set aws_secret_access_key ${{ secrets.BITIFUL_SECRET_ACCESS_KEY }}
@@ -241,11 +236,11 @@ jobs:
       - name: Build Linux (without S3 publish)
         run: npx electron-builder --linux --publish never
 
-      - name: Upload to S3 manually
-        run: |
-          # 安装 AWS CLI
-          pip3 install awscli
+      - name: Install AWS CLI
+        run: pip install awscli
 
+      - name: Upload to S3
+        run: |
           # 配置 AWS CLI for Bitiful S3
           aws configure set aws_access_key_id ${{ secrets.BITIFUL_ACCESS_KEY_ID }}
           aws configure set aws_secret_access_key ${{ secrets.BITIFUL_SECRET_ACCESS_KEY }}
