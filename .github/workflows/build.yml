@@ -1,6 +1,7 @@
 name: Build and Release
 
 on:
+  # 手动触发
   workflow_dispatch:
     inputs:
       version:
@@ -21,6 +22,10 @@ on:
           - mac,linux
           - win,linux
 
+  # 从源仓库触发
+  repository_dispatch:
+    types: [build-release]
+
 env:
   SOURCE_REPO: leaperone/2SOMEone-Desktop
   AWS_ACCESS_KEY_ID: ${{ secrets.BITIFUL_ACCESS_KEY_ID }}
@@ -30,15 +35,54 @@ env:
   BITIFUL_REGION: cn-east-1
 
 jobs:
+  # 准备构建参数
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.params.outputs.version }}
+      platforms: ${{ steps.params.outputs.platforms }}
+      build_mac: ${{ steps.params.outputs.build_mac }}
+      build_win: ${{ steps.params.outputs.build_win }}
+      build_linux: ${{ steps.params.outputs.build_linux }}
+    steps:
+      - name: Set build parameters
+        id: params
+        run: |
+          if [ "${{ github.event_name }}" == "repository_dispatch" ]; then
+            VERSION="${{ github.event.client_payload.version }}"
+            PLATFORMS="${{ github.event.client_payload.platforms }}"
+          else
+            VERSION="${{ inputs.version }}"
+            PLATFORMS="${{ inputs.platforms }}"
+          fi
+
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "platforms=${PLATFORMS}" >> $GITHUB_OUTPUT
+
+          # 判断要构建哪些平台
+          if [ "$PLATFORMS" == "all" ]; then
+            echo "build_mac=true" >> $GITHUB_OUTPUT
+            echo "build_win=true" >> $GITHUB_OUTPUT
+            echo "build_linux=true" >> $GITHUB_OUTPUT
+          else
+            [[ "$PLATFORMS" == *"mac"* ]] && echo "build_mac=true" >> $GITHUB_OUTPUT || echo "build_mac=false" >> $GITHUB_OUTPUT
+            [[ "$PLATFORMS" == *"win"* ]] && echo "build_win=true" >> $GITHUB_OUTPUT || echo "build_win=false" >> $GITHUB_OUTPUT
+            [[ "$PLATFORMS" == *"linux"* ]] && echo "build_linux=true" >> $GITHUB_OUTPUT || echo "build_linux=false" >> $GITHUB_OUTPUT
+          fi
+
+          echo "Building version: ${VERSION}"
+          echo "Platforms: ${PLATFORMS}"
+
   build-mac:
-    if: ${{ inputs.platforms == 'all' || contains(inputs.platforms, 'mac') }}
+    needs: prepare
+    if: needs.prepare.outputs.build_mac == 'true'
     runs-on: macos-latest
     steps:
       - name: Checkout source repo
         uses: actions/checkout@v4
         with:
           repository: ${{ env.SOURCE_REPO }}
-          ref: v${{ inputs.version }}
+          ref: v${{ needs.prepare.outputs.version }}
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v2
@@ -68,17 +112,19 @@ jobs:
             release/*.dmg
             release/*.zip
             release/*.yml
+            release/*.blockmap
           retention-days: 7
 
   build-win:
-    if: ${{ inputs.platforms == 'all' || contains(inputs.platforms, 'win') }}
+    needs: prepare
+    if: needs.prepare.outputs.build_win == 'true'
     runs-on: windows-latest
     steps:
       - name: Checkout source repo
         uses: actions/checkout@v4
         with:
           repository: ${{ env.SOURCE_REPO }}
-          ref: v${{ inputs.version }}
+          ref: v${{ needs.prepare.outputs.version }}
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v2
@@ -107,17 +153,19 @@ jobs:
           path: |
             release/*.exe
             release/*.yml
+            release/*.blockmap
           retention-days: 7
 
   build-linux:
-    if: ${{ inputs.platforms == 'all' || contains(inputs.platforms, 'linux') }}
+    needs: prepare
+    if: needs.prepare.outputs.build_linux == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout source repo
         uses: actions/checkout@v4
         with:
           repository: ${{ env.SOURCE_REPO }}
-          ref: v${{ inputs.version }}
+          ref: v${{ needs.prepare.outputs.version }}
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v2
@@ -150,7 +198,7 @@ jobs:
           retention-days: 7
 
   create-release:
-    needs: [build-mac, build-win, build-linux]
+    needs: [prepare, build-mac, build-win, build-linux]
     if: always() && (needs.build-mac.result == 'success' || needs.build-win.result == 'success' || needs.build-linux.result == 'success')
     runs-on: ubuntu-latest
     steps:
@@ -159,13 +207,16 @@ jobs:
         with:
           path: artifacts
 
+      - name: List artifacts
+        run: find artifacts -type f
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: v${{ inputs.version }}
-          name: Release v${{ inputs.version }}
+          tag_name: v${{ needs.prepare.outputs.version }}
+          name: Release v${{ needs.prepare.outputs.version }}
           draft: false
-          prerelease: ${{ contains(inputs.version, 'build') }}
+          prerelease: ${{ contains(needs.prepare.outputs.version, 'build') }}
           files: |
             artifacts/**/*.dmg
             artifacts/**/*.zip
