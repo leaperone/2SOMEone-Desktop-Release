@@ -1,0 +1,176 @@
+name: Build and Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to build (e.g., 1.0.0-build.1)'
+        required: true
+        type: string
+      platforms:
+        description: 'Platforms to build'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - mac
+          - win
+          - linux
+          - mac,win
+          - mac,linux
+          - win,linux
+
+env:
+  SOURCE_REPO: leaperone/2SOMEone-Desktop
+  AWS_ACCESS_KEY_ID: ${{ secrets.BITIFUL_ACCESS_KEY_ID }}
+  AWS_SECRET_ACCESS_KEY: ${{ secrets.BITIFUL_SECRET_ACCESS_KEY }}
+  BITIFUL_BUCKET: 2someone-web-static
+  BITIFUL_ENDPOINT: https://s3.bitiful.net
+  BITIFUL_REGION: cn-east-1
+
+jobs:
+  build-mac:
+    if: ${{ inputs.platforms == 'all' || contains(inputs.platforms, 'mac') }}
+    runs-on: macos-latest
+    steps:
+      - name: Checkout source repo
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.SOURCE_REPO }}
+          ref: v${{ inputs.version }}
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: 10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Build TypeScript
+        run: pnpm build
+
+      - name: Build and Publish macOS
+        run: npx electron-builder --mac --publish always
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: mac-builds
+          path: |
+            release/*.dmg
+            release/*.zip
+            release/*.yml
+          retention-days: 7
+
+  build-win:
+    if: ${{ inputs.platforms == 'all' || contains(inputs.platforms, 'win') }}
+    runs-on: windows-latest
+    steps:
+      - name: Checkout source repo
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.SOURCE_REPO }}
+          ref: v${{ inputs.version }}
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: 10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Build TypeScript
+        run: pnpm build
+
+      - name: Build and Publish Windows
+        run: npx electron-builder --win --publish always
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: win-builds
+          path: |
+            release/*.exe
+            release/*.yml
+          retention-days: 7
+
+  build-linux:
+    if: ${{ inputs.platforms == 'all' || contains(inputs.platforms, 'linux') }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source repo
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.SOURCE_REPO }}
+          ref: v${{ inputs.version }}
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: 10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Build TypeScript
+        run: pnpm build
+
+      - name: Build and Publish Linux
+        run: npx electron-builder --linux --publish always
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-builds
+          path: |
+            release/*.AppImage
+            release/*.deb
+            release/*.yml
+          retention-days: 7
+
+  create-release:
+    needs: [build-mac, build-win, build-linux]
+    if: always() && (needs.build-mac.result == 'success' || needs.build-win.result == 'success' || needs.build-linux.result == 'success')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: v${{ inputs.version }}
+          name: Release v${{ inputs.version }}
+          draft: false
+          prerelease: ${{ contains(inputs.version, 'build') }}
+          files: |
+            artifacts/**/*.dmg
+            artifacts/**/*.zip
+            artifacts/**/*.exe
+            artifacts/**/*.AppImage
+            artifacts/**/*.deb
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
