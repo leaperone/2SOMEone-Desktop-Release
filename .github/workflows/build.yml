@@ -291,25 +291,73 @@ jobs:
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.BITIFUL_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.BITIFUL_SECRET_ACCESS_KEY }}
+          S3_BUCKET: 2someone-web-static
+          S3_PATH: release/2someone-desktop
         run: |
           # 配置 AWS CLI for Bitiful S3
           aws configure set aws_access_key_id $AWS_ACCESS_KEY_ID
           aws configure set aws_secret_access_key $AWS_SECRET_ACCESS_KEY
           aws configure set default.region cn-east-1
 
-          # 上传所有文件到 S3
+          S3_ENDPOINT="https://s3.bitiful.net"
+          S3_OPTS="--endpoint-url $S3_ENDPOINT --acl public-read --no-verify-ssl"
+
+          # 上传所有文件到 S3（带版本号的原始文件）
           find artifacts -type f \( -name "*.dmg" -o -name "*.zip" -o -name "*.exe" -o -name "*.AppImage" -o -name "*.deb" -o -name "latest*.yml" -o -name "*.blockmap" \) | while read file; do
             filename=$(basename "$file")
             echo "Uploading $filename..."
-            aws s3 cp "$file" "s3://2someone-web-static/release/2someone-desktop/$filename" \
-              --endpoint-url https://s3.bitiful.net \
-              --acl public-read \
-              --no-verify-ssl
+            aws s3 cp "$file" "s3://$S3_BUCKET/$S3_PATH/$filename" $S3_OPTS
           done
+
+          # 创建 latest 别名文件（固定下载链接）
+          echo "Creating latest alias files..."
+
+          # macOS - dmg
+          MAC_DMG=$(find artifacts -name "*.dmg" | head -1)
+          if [ -n "$MAC_DMG" ]; then
+            echo "Creating 2SOMEone-Desktop-mac-latest.dmg -> $(basename $MAC_DMG)"
+            aws s3 cp "$MAC_DMG" "s3://$S3_BUCKET/$S3_PATH/2SOMEone-Desktop-mac-latest.dmg" $S3_OPTS
+          fi
+
+          # macOS - zip (for auto-update)
+          MAC_ZIP=$(find artifacts -name "*.zip" | head -1)
+          if [ -n "$MAC_ZIP" ]; then
+            echo "Creating 2SOMEone-Desktop-mac-latest.zip -> $(basename $MAC_ZIP)"
+            aws s3 cp "$MAC_ZIP" "s3://$S3_BUCKET/$S3_PATH/2SOMEone-Desktop-mac-latest.zip" $S3_OPTS
+          fi
+
+          # Windows - exe
+          WIN_EXE=$(find artifacts -name "*.exe" | head -1)
+          if [ -n "$WIN_EXE" ]; then
+            echo "Creating 2SOMEone-Desktop-win-latest.exe -> $(basename $WIN_EXE)"
+            aws s3 cp "$WIN_EXE" "s3://$S3_BUCKET/$S3_PATH/2SOMEone-Desktop-win-latest.exe" $S3_OPTS
+          fi
+
+          # Linux - AppImage
+          LINUX_APPIMAGE=$(find artifacts -name "*.AppImage" | head -1)
+          if [ -n "$LINUX_APPIMAGE" ]; then
+            echo "Creating 2SOMEone-Desktop-linux-latest.AppImage -> $(basename $LINUX_APPIMAGE)"
+            aws s3 cp "$LINUX_APPIMAGE" "s3://$S3_BUCKET/$S3_PATH/2SOMEone-Desktop-linux-latest.AppImage" $S3_OPTS
+          fi
+
+          # Linux - deb
+          LINUX_DEB=$(find artifacts -name "*.deb" | head -1)
+          if [ -n "$LINUX_DEB" ]; then
+            echo "Creating 2SOMEone-Desktop-linux-latest.deb -> $(basename $LINUX_DEB)"
+            aws s3 cp "$LINUX_DEB" "s3://$S3_BUCKET/$S3_PATH/2SOMEone-Desktop-linux-latest.deb" $S3_OPTS
+          fi
 
       - name: Verify S3 upload
         run: |
           echo "Verifying uploads..."
-          curl -sI "https://static.2some.ren/release/2someone-desktop/latest-mac.yml" | head -1 || echo "latest-mac.yml not found"
-          curl -sI "https://static.2some.ren/release/2someone-desktop/latest.yml" | head -1 || echo "latest.yml not found"
-          curl -sI "https://static.2some.ren/release/2someone-desktop/latest-linux.yml" | head -1 || echo "latest-linux.yml not found"
+          BASE_URL="https://static.2some.ren/release/2someone-desktop"
+
+          echo "=== Version files ==="
+          curl -sI "$BASE_URL/latest-mac.yml" | head -1
+          curl -sI "$BASE_URL/latest.yml" | head -1
+          curl -sI "$BASE_URL/latest-linux.yml" | head -1
+
+          echo "=== Latest download links ==="
+          curl -sI "$BASE_URL/2SOMEone-Desktop-mac-latest.dmg" | head -1
+          curl -sI "$BASE_URL/2SOMEone-Desktop-win-latest.exe" | head -1
+          curl -sI "$BASE_URL/2SOMEone-Desktop-linux-latest.AppImage" | head -1
