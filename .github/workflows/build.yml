@@ -118,13 +118,18 @@ jobs:
             -k "$KEYCHAIN_PATH" \
             -P "$CSC_KEY_PASSWORD" \
             -T /usr/bin/codesign \
-            -T /usr/bin/productbuild
+            -T /usr/bin/productbuild \
+            -T /usr/bin/security
 
           # 设置 partition list
-          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
 
-          # 将 keychain 添加到搜索列表
+          # 将 keychain 添加到搜索列表并设为默认
           security list-keychains -d user -s "$KEYCHAIN_PATH" $(security list-keychains -d user | sed s/\"//g)
+          security default-keychain -s "$KEYCHAIN_PATH"
+
+          # 验证证书
+          security find-identity -v -p codesigning "$KEYCHAIN_PATH"
 
           # 清理临时文件
           rm certificate.p12
