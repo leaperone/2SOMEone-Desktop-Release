@@ -11,16 +11,12 @@ on:
       platforms:
         description: 'Platforms to build'
         required: true
-        default: 'all'
+        default: 'win,linux'
         type: choice
         options:
-          - all
-          - mac
+          - win,linux
           - win
           - linux
-          - mac,win
-          - mac,linux
-          - win,linux
 
   # 从源仓库触发
   repository_dispatch:
@@ -54,16 +50,10 @@ jobs:
           echo "version=${VERSION}" >> $GITHUB_OUTPUT
           echo "platforms=${PLATFORMS}" >> $GITHUB_OUTPUT
 
-          # 判断要构建哪些平台
-          if [ "$PLATFORMS" == "all" ]; then
-            echo "build_mac=true" >> $GITHUB_OUTPUT
-            echo "build_win=true" >> $GITHUB_OUTPUT
-            echo "build_linux=true" >> $GITHUB_OUTPUT
-          else
-            [[ "$PLATFORMS" == *"mac"* ]] && echo "build_mac=true" >> $GITHUB_OUTPUT || echo "build_mac=false" >> $GITHUB_OUTPUT
-            [[ "$PLATFORMS" == *"win"* ]] && echo "build_win=true" >> $GITHUB_OUTPUT || echo "build_win=false" >> $GITHUB_OUTPUT
-            [[ "$PLATFORMS" == *"linux"* ]] && echo "build_linux=true" >> $GITHUB_OUTPUT || echo "build_linux=false" >> $GITHUB_OUTPUT
-          fi
+          # 判断要构建哪些平台 (macOS 在本地构建，远程只构建 Windows/Linux)
+          echo "build_mac=false" >> $GITHUB_OUTPUT
+          [[ "$PLATFORMS" == *"win"* ]] && echo "build_win=true" >> $GITHUB_OUTPUT || echo "build_win=false" >> $GITHUB_OUTPUT
+          [[ "$PLATFORMS" == *"linux"* ]] && echo "build_linux=true" >> $GITHUB_OUTPUT || echo "build_linux=false" >> $GITHUB_OUTPUT
 
           echo "Building version: ${VERSION}"
           echo "Platforms: ${PLATFORMS}"
