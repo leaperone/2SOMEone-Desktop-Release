@@ -11,10 +11,13 @@ on:
       platforms:
         description: 'Platforms to build'
         required: true
-        default: 'win,linux'
+        default: 'all'
         type: choice
         options:
+          - all
+          - mac,win,linux
           - win,linux
+          - mac
           - win
           - linux
 
@@ -32,6 +35,7 @@ jobs:
     outputs:
       version: ${{ steps.params.outputs.version }}
       platforms: ${{ steps.params.outputs.platforms }}
+      build_mac: ${{ steps.params.outputs.build_mac }}
       build_win: ${{ steps.params.outputs.build_win }}
       build_linux: ${{ steps.params.outputs.build_linux }}
     steps:
@@ -46,10 +50,16 @@ jobs:
             PLATFORMS="${{ inputs.platforms }}"
           fi
 
+          # "all" 等价于 "mac,win,linux"
+          if [ "$PLATFORMS" == "all" ]; then
+            PLATFORMS="mac,win,linux"
+          fi
+
           echo "version=${VERSION}" >> $GITHUB_OUTPUT
           echo "platforms=${PLATFORMS}" >> $GITHUB_OUTPUT
 
-          # 判断要构建哪些平台 (macOS 在本地构建，远程只构建 Windows/Linux)
+          # 判断要构建哪些平台
+          [[ "$PLATFORMS" == *"mac"* ]] && echo "build_mac=true" >> $GITHUB_OUTPUT || echo "build_mac=false" >> $GITHUB_OUTPUT
           [[ "$PLATFORMS" == *"win"* ]] && echo "build_win=true" >> $GITHUB_OUTPUT || echo "build_win=false" >> $GITHUB_OUTPUT
           [[ "$PLATFORMS" == *"linux"* ]] && echo "build_linux=true" >> $GITHUB_OUTPUT || echo "build_linux=false" >> $GITHUB_OUTPUT
 
@@ -57,7 +67,192 @@ jobs:
           echo "Platforms: ${PLATFORMS}"
 
   # ============ 构建阶段 ============
-  # 注意: macOS 在本地构建（签名+公证），不在 GitHub Actions 构建
+
+  build-mac:
+    needs: prepare
+    if: needs.prepare.outputs.build_mac == 'true'
+    runs-on: macos-14
+    timeout-minutes: 60
+    steps:
+      - name: Checkout source repo
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.SOURCE_REPO }}
+          ref: v${{ needs.prepare.outputs.version }}
+          token: ${{ secrets.SOURCE_REPO_TOKEN }}
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: 10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Build TypeScript
+        run: pnpm build
+
+      - name: Import signing certificate
+        env:
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+        run: |
+          KEYCHAIN_PASSWORD="ci-build-$(date +%s)"
+          KEYCHAIN_PATH="$RUNNER_TEMP/build.keychain-db"
+
+          # 创建临时 Keychain
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+          # 导入证书
+          echo "$CSC_LINK" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" \
+            -k "$KEYCHAIN_PATH" \
+            -P "$CSC_KEY_PASSWORD" \
+            -T /usr/bin/codesign \
+            -T /usr/bin/security
+          rm "$RUNNER_TEMP/cert.p12"
+
+          # 设置 ACL（防止密码弹窗）
+          security set-key-partition-list \
+            -S apple-tool:,apple:,codesign: \
+            -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+          # 加入 Keychain 搜索列表
+          security list-keychains -d user -s "$KEYCHAIN_PATH" $(security list-keychains -d user | tr -d '"')
+
+          # 验证证书导入
+          security find-identity -v -p codesigning "$KEYCHAIN_PATH"
+
+          # 保存 Keychain 路径供后续步骤清理
+          echo "KEYCHAIN_PATH=$KEYCHAIN_PATH" >> $GITHUB_ENV
+
+      - name: Build macOS app (unsigned)
+        run: CSC_IDENTITY_AUTO_DISCOVERY=false npx electron-builder --mac --publish never
+
+      - name: Sign application
+        run: |
+          IDENTITY="Developer ID Application: Zhuhai Zhiwei Network Technology Co., Ltd. (5UAHRS482C)"
+          APP_PATH="release/mac-arm64/2SOMEone-Desktop.app"
+          ENTITLEMENTS="build/entitlements.mac.plist"
+
+          if [ ! -d "$APP_PATH" ]; then
+            echo "❌ Build failed: .app not found"
+            exit 1
+          fi
+
+          echo "Signing dylib files..."
+          find "$APP_PATH" -name "*.dylib" -exec codesign --force --timestamp --options runtime --sign "$IDENTITY" {} \;
+
+          echo "Signing .so files..."
+          find "$APP_PATH" -name "*.so" -exec codesign --force --timestamp --options runtime --sign "$IDENTITY" {} \; 2>/dev/null || true
+
+          echo "Signing Helper apps..."
+          find "$APP_PATH/Contents/Frameworks" -name "*.app" -exec codesign --force --timestamp --options runtime --entitlements "$ENTITLEMENTS" --sign "$IDENTITY" {} \;
+
+          echo "Signing Framework executables..."
+          find "$APP_PATH/Contents/Frameworks" -type f -perm +111 ! -name "*.dylib" ! -name "*.so" -exec codesign --force --timestamp --options runtime --sign "$IDENTITY" {} \; 2>/dev/null || true
+
+          echo "Signing Frameworks..."
+          find "$APP_PATH/Contents/Frameworks" -name "*.framework" -exec codesign --force --timestamp --options runtime --sign "$IDENTITY" {} \;
+
+          echo "Signing main app..."
+          codesign --force --timestamp --options runtime --entitlements "$ENTITLEMENTS" --sign "$IDENTITY" "$APP_PATH"
+
+          echo "Verifying signature..."
+          codesign -dv --verbose=2 "$APP_PATH" 2>&1 | grep -E "(Authority|TeamIdentifier|Identifier)" || true
+          codesign --verify --deep --strict "$APP_PATH"
+          echo "✅ Signature verified"
+
+      - name: Notarize application
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          APP_PATH="release/mac-arm64/2SOMEone-Desktop.app"
+
+          # 创建公证用 ZIP
+          ditto -c -k --keepParent "$APP_PATH" release/notarize.zip
+
+          # 提交公证并等待（最长 30 分钟）
+          xcrun notarytool submit release/notarize.zip \
+            --apple-id "$APPLE_ID" \
+            --password "$APPLE_APP_SPECIFIC_PASSWORD" \
+            --team-id "$APPLE_TEAM_ID" \
+            --wait --timeout 30m
+
+          rm release/notarize.zip
+
+          # Staple 公证票据
+          xcrun stapler staple "$APP_PATH"
+          echo "✅ Notarization complete"
+
+      - name: Create distribution files
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          APP_PATH="release/mac-arm64/2SOMEone-Desktop.app"
+
+          # 创建 ZIP
+          ZIP_FILE="release/2SOMEone-Desktop-${VERSION}-arm64.zip"
+          ditto -c -k --keepParent "$APP_PATH" "$ZIP_FILE"
+
+          # 创建 DMG
+          DMG_FILE="release/2SOMEone-Desktop-${VERSION}-arm64.dmg"
+          hdiutil create -volname "2SOMEone-Desktop" -srcfolder "$APP_PATH" -ov -format UDZO "$DMG_FILE"
+
+          # 生成 latest-mac.yml
+          DMG_SHA512=$(shasum -a 512 "$DMG_FILE" | awk '{print $1}' | xxd -r -p | base64)
+          DMG_SIZE=$(stat -f%z "$DMG_FILE")
+          ZIP_SHA512=$(shasum -a 512 "$ZIP_FILE" | awk '{print $1}' | xxd -r -p | base64)
+          ZIP_SIZE=$(stat -f%z "$ZIP_FILE")
+          RELEASE_DATE=$(date -u +%Y-%m-%dT%H:%M:%S.000Z)
+
+          cat > release/latest-mac.yml << EOF
+          version: ${VERSION}
+          files:
+            - url: 2SOMEone-Desktop-${VERSION}-arm64.dmg
+              sha512: ${DMG_SHA512}
+              size: ${DMG_SIZE}
+            - url: 2SOMEone-Desktop-${VERSION}-arm64.zip
+              sha512: ${ZIP_SHA512}
+              size: ${ZIP_SIZE}
+          path: 2SOMEone-Desktop-${VERSION}-arm64.dmg
+          sha512: ${DMG_SHA512}
+          releaseDate: '${RELEASE_DATE}'
+          EOF
+
+          # 去掉 heredoc 的缩进
+          sed -i '' 's/^          //' release/latest-mac.yml
+
+          echo "✅ Distribution files created"
+          ls -lh release/*.dmg release/*.zip release/latest-mac.yml
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: mac-builds
+          path: |
+            release/*.dmg
+            release/*.zip
+            release/latest-mac.yml
+            release/*.blockmap
+          retention-days: 7
+
+      - name: Cleanup keychain
+        if: always()
+        run: |
+          if [ -n "$KEYCHAIN_PATH" ] && [ -f "$KEYCHAIN_PATH" ]; then
+            security delete-keychain "$KEYCHAIN_PATH" || true
+          fi
 
   build-win:
     needs: prepare
@@ -145,8 +340,8 @@ jobs:
 
   # ============ 发布阶段 ============
   create-release:
-    needs: [prepare, build-win, build-linux]
-    if: always() && (needs.build-win.result == 'success' || needs.build-linux.result == 'success')
+    needs: [prepare, build-mac, build-win, build-linux]
+    if: always() && (needs.build-mac.result == 'success' || needs.build-win.result == 'success' || needs.build-linux.result == 'success')
     runs-on: ubuntu-latest
     steps:
       - name: Download all artifacts
@@ -165,6 +360,8 @@ jobs:
           draft: false
           prerelease: ${{ contains(needs.prepare.outputs.version, 'build') }}
           files: |
+            artifacts/**/*.dmg
+            artifacts/**/*.zip
             artifacts/**/*.exe
             artifacts/**/*.AppImage
             artifacts/**/*.deb
@@ -205,7 +402,7 @@ jobs:
           S3_OPTS="--endpoint-url $S3_ENDPOINT --no-verify-ssl"
 
           # 上传所有文件到 S3（带版本号的原始文件 + yml）
-          find artifacts -type f \( -name "*.exe" -o -name "*.AppImage" -o -name "*.deb" -o -name "latest*.yml" -o -name "*.blockmap" \) | while read file; do
+          find artifacts -type f \( -name "*.dmg" -o -name "*.zip" -o -name "*.exe" -o -name "*.AppImage" -o -name "*.deb" -o -name "latest*.yml" -o -name "*.blockmap" \) | while read file; do
             filename=$(basename "$file")
             echo "Uploading $filename..."
             aws s3 cp "$file" "s3://$S3_BUCKET/$S3_PATH/$filename" $S3_OPTS
@@ -213,6 +410,20 @@ jobs:
 
           # 创建 latest 别名文件（固定下载链接）
           echo "Creating latest alias files..."
+
+          # macOS - dmg
+          MAC_DMG=$(find artifacts -name "*.dmg" | head -1)
+          if [ -n "$MAC_DMG" ]; then
+            echo "Creating 2SOMEone-Desktop-mac-latest.dmg"
+            aws s3 cp "$MAC_DMG" "s3://$S3_BUCKET/$S3_PATH/2SOMEone-Desktop-mac-latest.dmg" $S3_OPTS
+          fi
+
+          # macOS - zip (for auto-update)
+          MAC_ZIP=$(find artifacts -name "*-arm64.zip" | head -1)
+          if [ -n "$MAC_ZIP" ]; then
+            echo "Creating 2SOMEone-Desktop-mac-latest.zip"
+            aws s3 cp "$MAC_ZIP" "s3://$S3_BUCKET/$S3_PATH/2SOMEone-Desktop-mac-latest.zip" $S3_OPTS
+          fi
 
           # Windows - exe
           WIN_EXE=$(find artifacts -name "*.exe" | head -1)
@@ -241,9 +452,11 @@ jobs:
           BASE_URL="https://static.2some.ren/release/2someone-desktop"
 
           echo "=== Version files ==="
+          curl -sI "$BASE_URL/latest-mac.yml" | head -1
           curl -sI "$BASE_URL/latest.yml" | head -1
           curl -sI "$BASE_URL/latest-linux.yml" | head -1
 
           echo "=== Latest download links ==="
+          curl -sI "$BASE_URL/2SOMEone-Desktop-mac-latest.dmg" | head -1
           curl -sI "$BASE_URL/2SOMEone-Desktop-Setup-latest.exe" | head -1
           curl -sI "$BASE_URL/2SOMEone-Desktop-latest.AppImage" | head -1
