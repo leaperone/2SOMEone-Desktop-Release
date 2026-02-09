@@ -146,41 +146,31 @@ jobs:
           codesign --verify --deep --strict "$APP_PATH"
           echo "✅ Signature verified"
 
-      - name: Notarize application
+      - name: Notarize, create distribution files
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          VERSION: ${{ needs.prepare.outputs.version }}
         run: |
           APP_PATH="release/mac-arm64/2SOMEone.app"
 
-          # 创建公证用 ZIP
+          # 1. 公证 .app
           ditto -c -k --keepParent "$APP_PATH" release/notarize.zip
-
-          # 提交公证并等待（最长 30 分钟）
           xcrun notarytool submit release/notarize.zip \
             --apple-id "$APPLE_ID" \
             --password "$APPLE_APP_SPECIFIC_PASSWORD" \
             --team-id "$APPLE_TEAM_ID" \
             --wait --timeout 30m
-
           rm release/notarize.zip
-
-          # Staple 公证票据
           xcrun stapler staple "$APP_PATH"
-          echo "✅ Notarization complete"
+          echo "✅ App notarization complete"
 
-      - name: Create distribution files
-        env:
-          VERSION: ${{ needs.prepare.outputs.version }}
-        run: |
-          APP_PATH="release/mac-arm64/2SOMEone.app"
-
-          # 创建 ZIP
+          # 2. 创建 ZIP（从已公证的 .app）
           ZIP_FILE="release/2SOMEone-Desktop-${VERSION}-arm64.zip"
           ditto -c -k --keepParent "$APP_PATH" "$ZIP_FILE"
 
-          # 创建 DMG（含 Applications 快捷方式，支持拖动安装）
+          # 3. 创建 DMG（含 Applications 快捷方式）
           DMG_FILE="release/2SOMEone-Desktop-${VERSION}-arm64.dmg"
           DMG_STAGING="release/dmg-staging"
           mkdir -p "$DMG_STAGING"
@@ -188,6 +178,15 @@ jobs:
           ln -s /Applications "$DMG_STAGING/Applications"
           hdiutil create -volname "2SOMEone-Desktop" -srcfolder "$DMG_STAGING" -ov -format UDZO "$DMG_FILE"
           rm -rf "$DMG_STAGING"
+
+          # 4. 公证 DMG
+          xcrun notarytool submit "$DMG_FILE" \
+            --apple-id "$APPLE_ID" \
+            --password "$APPLE_APP_SPECIFIC_PASSWORD" \
+            --team-id "$APPLE_TEAM_ID" \
+            --wait --timeout 30m
+          xcrun stapler staple "$DMG_FILE"
+          echo "✅ DMG notarization complete"
 
           # 生成 latest-mac.yml
           DMG_SHA512=$(shasum -a 512 "$DMG_FILE" | awk '{print $1}' | xxd -r -p | base64)
