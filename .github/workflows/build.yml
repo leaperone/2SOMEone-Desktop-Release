@@ -205,9 +205,14 @@ jobs:
           ZIP_FILE="release/2SOMEone-Desktop-${VERSION}-arm64.zip"
           ditto -c -k --keepParent "$APP_PATH" "$ZIP_FILE"
 
-          # 创建 DMG
+          # 创建 DMG（含 Applications 快捷方式，支持拖动安装）
           DMG_FILE="release/2SOMEone-Desktop-${VERSION}-arm64.dmg"
-          hdiutil create -volname "2SOMEone-Desktop" -srcfolder "$APP_PATH" -ov -format UDZO "$DMG_FILE"
+          DMG_STAGING="release/dmg-staging"
+          mkdir -p "$DMG_STAGING"
+          cp -R "$APP_PATH" "$DMG_STAGING/"
+          ln -s /Applications "$DMG_STAGING/Applications"
+          hdiutil create -volname "2SOMEone-Desktop" -srcfolder "$DMG_STAGING" -ov -format UDZO "$DMG_FILE"
+          rm -rf "$DMG_STAGING"
 
           # 生成 latest-mac.yml
           DMG_SHA512=$(shasum -a 512 "$DMG_FILE" | awk '{print $1}' | xxd -r -p | base64)
