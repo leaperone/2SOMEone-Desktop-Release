@@ -233,6 +233,10 @@ jobs:
           # 去掉 heredoc 的缩进
           sed -i '' 's/^          //' release/latest-mac.yml
 
+          # Remove electron-builder's unsigned DMG/blockmap to avoid confusion
+          find release -name "*.dmg" ! -name "2SOMEone-Desktop-${VERSION}-arm64.dmg" -delete
+          find release -name "*.blockmap" -delete
+
           echo "✅ Distribution files created"
           ls -lh release/*.dmg release/*.zip release/latest-mac.yml
 
@@ -411,15 +415,18 @@ jobs:
           # 创建 latest 别名文件（固定下载链接）
           echo "Creating latest alias files..."
 
-          # macOS - dmg
-          MAC_DMG=$(find artifacts -name "*.dmg" | head -1)
+          # macOS - dmg (use VERSION to pick the correctly signed DMG)
+          MAC_DMG=$(find artifacts -name "2SOMEone-Desktop-${VERSION}-arm64.dmg" | head -1)
+          if [ -z "$MAC_DMG" ]; then
+            MAC_DMG=$(find artifacts -name "*.dmg" | head -1)
+          fi
           if [ -n "$MAC_DMG" ]; then
-            echo "Creating 2SOMEone-Desktop-mac-latest.dmg"
+            echo "Creating 2SOMEone-Desktop-mac-latest.dmg from $(basename $MAC_DMG)"
             aws s3 cp "$MAC_DMG" "s3://$S3_BUCKET/$S3_PATH/2SOMEone-Desktop-mac-latest.dmg" $S3_OPTS
           fi
 
           # macOS - zip (for auto-update)
-          MAC_ZIP=$(find artifacts -name "*-arm64.zip" | head -1)
+          MAC_ZIP=$(find artifacts -name "2SOMEone-Desktop-${VERSION}-arm64.zip" -o -name "*-arm64.zip" | head -1)
           if [ -n "$MAC_ZIP" ]; then
             echo "Creating 2SOMEone-Desktop-mac-latest.zip"
             aws s3 cp "$MAC_ZIP" "s3://$S3_BUCKET/$S3_PATH/2SOMEone-Desktop-mac-latest.zip" $S3_OPTS
