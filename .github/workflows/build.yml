@@ -439,10 +439,10 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.BITIFUL_SECRET_ACCESS_KEY }}
           S3_BUCKET: 2someone-web-static
           S3_PATH: release/2someone-desktop
+          VERSION: ${{ needs.prepare.outputs.version }}
         run: |
-          # 保留策略：最新 2 个正式版本，每个版本保留最新 2 个 build
-          KEEP_VERSIONS=2
-          KEEP_BUILDS=2
+          # 保留策略：只保留当前版本 + latest 别名 + yml 元数据
+          # 历史版本都在 GitHub Release 上有完整留存，S3 仅作 CDN 加速
 
           aws configure set aws_access_key_id $AWS_ACCESS_KEY_ID
           aws configure set aws_secret_access_key $AWS_SECRET_ACCESS_KEY
@@ -457,49 +457,18 @@ jobs:
             | grep -v '^$' > /tmp/s3_all.txt
 
           echo "Total files on S3: $(wc -l < /tmp/s3_all.txt)"
+          echo "Current version: ${VERSION}"
 
-          # 提取所有版本号（major.minor.patch），去重
-          # 例：1.0.3-build.10 → base version 1.0.3
-          grep -oE '[0-9]+\.[0-9]+\.[0-9]+' /tmp/s3_all.txt \
-            | sort -u -t. -k1,1nr -k2,2nr -k3,3nr \
-            | head -n $KEEP_VERSIONS > /tmp/s3_keep_bases.txt
-
-          echo "=== Keeping base versions ==="
-          cat /tmp/s3_keep_bases.txt
-
-          # 对每个保留的 base version，找出其所有 build 并只保留最新 N 个
-          > /tmp/s3_keep_versions.txt
-          while IFS= read -r base; do
-            # 提取该 base version 的所有 build 号
-            grep -oE "${base}(-build\.[0-9]+)?" /tmp/s3_all.txt \
-              | sort -u \
-              | awk -F'-build.' -v base="$base" '{
-                  if ($2 != "") {
-                    printf "%010d %s\n", $2, $0
-                  } else {
-                    printf "9999999999 %s\n", $0
-                  }
-                }' \
-              | sort -rn \
-              | head -n $KEEP_BUILDS \
-              | awk '{print $2}' >> /tmp/s3_keep_versions.txt
-          done < /tmp/s3_keep_bases.txt
-
-          echo "=== Keeping versions ==="
-          cat /tmp/s3_keep_versions.txt
-
-          # 构建保留文件列表（匹配保留版本 + latest 别名 + yml 元数据）
-          > /tmp/s3_keep_files.txt
+          # 筛选要删除的文件
+          > /tmp/s3_delete.txt
           while IFS= read -r fname; do
             [ -z "$fname" ] && continue
             keep=false
 
-            # 检查是否匹配保留版本
-            while IFS= read -r ver; do
-              case "$fname" in *"$ver"*) keep=true; break ;; esac
-            done < /tmp/s3_keep_versions.txt
+            # 保留当前版本的文件
+            case "$fname" in *"${VERSION}"*) keep=true ;; esac
 
-            # 保留 latest 别名和 yml
+            # 保留 latest 别名和 yml 元数据
             case "$fname" in
               latest-mac.yml|latest.yml|latest-linux.yml) keep=true ;;
               2SOMEone-Desktop-mac-latest.*) keep=true ;;
@@ -517,7 +486,7 @@ jobs:
             exit 0
           fi
 
-          echo "=== Deleting $(wc -l < /tmp/s3_delete.txt) files ==="
+          echo "=== Deleting $(wc -l < /tmp/s3_delete.txt) old files ==="
           while IFS= read -r fname; do
             [ -z "$fname" ] && continue
             echo "  rm: $fname"
