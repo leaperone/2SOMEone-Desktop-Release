@@ -447,3 +447,19 @@ jobs:
           curl -sI "$BASE_URL/2SOMEone-Desktop-mac-latest.dmg" | head -1
           curl -sI "$BASE_URL/2SOMEone-Desktop-Setup-latest.exe" | head -1
           curl -sI "$BASE_URL/2SOMEone-Desktop-latest.AppImage" | head -1
+
+  # ============ 飞书通知 ============
+  notify:
+    needs: [prepare, build-mac, build-win, build-linux, create-release, upload-to-s3]
+    if: always()
+    uses: leaperone/leaperone-releases/.github/workflows/feishu-notification.yml@main
+    with:
+      status: ${{ (needs.upload-to-s3.result == 'success') && 'success' || 'failure' }}
+      ref: v${{ needs.prepare.outputs.version }}
+      run_number: ${{ github.run_number }}
+      message: "2SOMEone Desktop v${{ needs.prepare.outputs.version }} (${{ needs.prepare.outputs.platforms }})"
+      author: ${{ github.actor }}
+      run_id: ${{ github.run_id }}
+      repository: leaperone/2SOMEone-Desktop
+    secrets:
+      FEISHU_WEBHOOK_URL: ${{ secrets.FEISHU_WEBHOOK_URL }}
