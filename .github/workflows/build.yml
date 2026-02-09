@@ -140,7 +140,7 @@ jobs:
       - name: Sign application
         run: |
           IDENTITY="Developer ID Application: Zhuhai Zhiwei Network Technology Co., Ltd. (5UAHRS482C)"
-          APP_PATH="release/mac-arm64/2SOMEone-Desktop.app"
+          APP_PATH="release/mac-arm64/2SOMEone.app"
           ENTITLEMENTS="build/entitlements.mac.plist"
 
           if [ ! -d "$APP_PATH" ]; then
@@ -177,7 +177,7 @@ jobs:
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
-          APP_PATH="release/mac-arm64/2SOMEone-Desktop.app"
+          APP_PATH="release/mac-arm64/2SOMEone.app"
 
           # 创建公证用 ZIP
           ditto -c -k --keepParent "$APP_PATH" release/notarize.zip
@@ -199,7 +199,7 @@ jobs:
         env:
           VERSION: ${{ needs.prepare.outputs.version }}
         run: |
-          APP_PATH="release/mac-arm64/2SOMEone-Desktop.app"
+          APP_PATH="release/mac-arm64/2SOMEone.app"
 
           # 创建 ZIP
           ZIP_FILE="release/2SOMEone-Desktop-${VERSION}-arm64.zip"
