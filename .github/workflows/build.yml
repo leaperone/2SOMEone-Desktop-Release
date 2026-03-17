@@ -355,7 +355,7 @@ jobs:
   upload-to-s3:
     needs: [prepare, create-release]
     if: always() && needs.create-release.result == 'success'
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, china]
     steps:
       - name: Download all artifacts
         uses: actions/download-artifact@v4
