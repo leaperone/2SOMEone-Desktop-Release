@@ -26,7 +26,7 @@ on:
     types: [build-release]
 
 env:
-  SOURCE_REPO: leaperone/2SOMEone-Desktop
+  SOURCE_REPO: leaperone/2SOMEone
 
 jobs:
   # 准备构建参数
@@ -78,7 +78,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: ${{ env.SOURCE_REPO }}
-          ref: v${{ needs.prepare.outputs.version }}
+          ref: desktop-v${{ needs.prepare.outputs.version }}
           token: ${{ secrets.SOURCE_REPO_TOKEN }}
 
       - name: Setup pnpm
@@ -96,7 +96,7 @@ jobs:
         run: pnpm install
 
       - name: Build TypeScript
-        run: pnpm build
+        run: pnpm --filter 2someone-desktop build
 
       - name: Import signing certificate
         env:
@@ -137,6 +137,7 @@ jobs:
       - name: Build and sign macOS app
         env:
           CSC_KEYCHAIN: ${{ env.KEYCHAIN_PATH }}
+        working-directory: apps/desktop
         run: |
           npx electron-builder --mac --publish never
 
@@ -152,6 +153,7 @@ jobs:
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           VERSION: ${{ needs.prepare.outputs.version }}
+        working-directory: apps/desktop
         run: |
           APP_PATH="release/mac-arm64/2SOMEone.app"
 
@@ -224,10 +226,10 @@ jobs:
         with:
           name: mac-builds
           path: |
-            release/*.dmg
-            release/*.zip
-            release/latest-mac.yml
-            release/*.blockmap
+            apps/desktop/release/*.dmg
+            apps/desktop/release/*.zip
+            apps/desktop/release/latest-mac.yml
+            apps/desktop/release/*.blockmap
           retention-days: 7
 
       - name: Cleanup keychain
@@ -246,7 +248,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: ${{ env.SOURCE_REPO }}
-          ref: v${{ needs.prepare.outputs.version }}
+          ref: desktop-v${{ needs.prepare.outputs.version }}
           token: ${{ secrets.SOURCE_REPO_TOKEN }}
 
       - name: Setup pnpm
@@ -264,9 +266,10 @@ jobs:
         run: pnpm install
 
       - name: Build TypeScript
-        run: pnpm build
+        run: pnpm --filter 2someone-desktop build
 
       - name: Build Windows
+        working-directory: apps/desktop
         run: npx electron-builder --win --publish never
 
       - name: Upload artifacts
@@ -274,9 +277,9 @@ jobs:
         with:
           name: win-builds
           path: |
-            release/*.exe
-            release/latest.yml
-            release/*.blockmap
+            apps/desktop/release/*.exe
+            apps/desktop/release/latest.yml
+            apps/desktop/release/*.blockmap
           retention-days: 7
 
   build-linux:
@@ -288,7 +291,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: ${{ env.SOURCE_REPO }}
-          ref: v${{ needs.prepare.outputs.version }}
+          ref: desktop-v${{ needs.prepare.outputs.version }}
           token: ${{ secrets.SOURCE_REPO_TOKEN }}
 
       - name: Setup pnpm
@@ -306,9 +309,10 @@ jobs:
         run: pnpm install
 
       - name: Build TypeScript
-        run: pnpm build
+        run: pnpm --filter 2someone-desktop build
 
       - name: Build Linux
+        working-directory: apps/desktop
         run: npx electron-builder --linux --publish never
 
       - name: Upload artifacts
@@ -316,9 +320,9 @@ jobs:
         with:
           name: linux-builds
           path: |
-            release/*.AppImage
-            release/*.deb
-            release/latest-linux.yml
+            apps/desktop/release/*.AppImage
+            apps/desktop/release/*.deb
+            apps/desktop/release/latest-linux.yml
           retention-days: 7
 
   # ============ 发布阶段 ============
@@ -338,8 +342,8 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: v${{ needs.prepare.outputs.version }}
-          name: Release v${{ needs.prepare.outputs.version }}
+          tag_name: desktop-v${{ needs.prepare.outputs.version }}
+          name: Desktop Release v${{ needs.prepare.outputs.version }}
           draft: false
           prerelease: ${{ contains(needs.prepare.outputs.version, 'build') }}
           files: |
@@ -525,6 +529,6 @@ jobs:
       message: "2SOMEone Desktop v${{ needs.prepare.outputs.version }} (${{ needs.prepare.outputs.platforms }})"
       author: ${{ github.actor }}
       run_id: ${{ github.run_id }}
-      repository: leaperone/2SOMEone-Desktop
+      repository: leaperone/2SOMEone
     secrets:
       FEISHU_WEBHOOK_URL: ${{ secrets.FEISHU_WEBHOOK_URL }}
