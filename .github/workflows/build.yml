@@ -359,9 +359,7 @@ jobs:
   upload-to-s3:
     needs: [prepare, create-release]
     if: always() && needs.create-release.result == 'success'
-    runs-on: [self-hosted, china]
-    env:
-      PATH: /usr/local/bin:/usr/bin:/bin
+    runs-on: ubuntu-latest
     steps:
       - name: Download all artifacts
         uses: actions/download-artifact@v4
@@ -372,9 +370,7 @@ jobs:
         run: find artifacts -type f
 
       - name: Ensure AWS CLI available
-        run: |
-          export PATH="/usr/local/bin:$PATH"
-          aws --version
+        run: aws --version
 
       - name: Upload to S3
         env:
