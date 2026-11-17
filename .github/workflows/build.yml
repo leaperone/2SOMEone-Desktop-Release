@@ -344,7 +344,7 @@ jobs:
   create-release:
     needs: [prepare, build-mac, build-win, build-linux]
     if: >-
-      always() &&
+      !cancelled() &&
       !contains(needs.*.result, 'failure') &&
       !contains(needs.*.result, 'cancelled') &&
       (needs.build-mac.result == 'success' || needs.build-win.result == 'success' || needs.build-linux.result == 'success')
@@ -377,7 +377,7 @@ jobs:
   # ============ S3 同步阶段 ============
   upload-to-s3:
     needs: [prepare, create-release]
-    if: always() && needs.create-release.result == 'success'
+    if: ${{ !cancelled() && needs.create-release.result == 'success' }}
     runs-on: ubuntu-latest
     steps:
       - name: Download all artifacts
