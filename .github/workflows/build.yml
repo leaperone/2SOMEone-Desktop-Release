@@ -155,6 +155,21 @@ jobs:
           VERSION: ${{ needs.prepare.outputs.version }}
         working-directory: apps/desktop
         run: |
+          staple_ticket() {
+            local attempt staple_exit
+            for attempt in 1 2 3; do
+              if xcrun stapler staple "$1"; then
+                return 0
+              else
+                staple_exit=$?
+              fi
+              if [ "$staple_exit" -ne 68 ] || [ "$attempt" -eq 3 ]; then
+                return "$staple_exit"
+              fi
+              sleep "$((attempt * 5))"
+            done
+          }
+
           APP_PATH="release/mac-arm64/2SOMEone.app"
 
           # 1. 公证 .app
@@ -165,7 +180,7 @@ jobs:
             --team-id "$APPLE_TEAM_ID" \
             --wait --timeout 30m
           rm release/notarize.zip
-          xcrun stapler staple "$APP_PATH"
+          staple_ticket "$APP_PATH"
           echo "✅ App notarization complete"
 
           # 2. 创建 ZIP（从已公证的 .app）
@@ -187,7 +202,7 @@ jobs:
             --password "$APPLE_APP_SPECIFIC_PASSWORD" \
             --team-id "$APPLE_TEAM_ID" \
             --wait --timeout 30m
-          xcrun stapler staple "$DMG_FILE"
+          staple_ticket "$DMG_FILE"
           echo "✅ DMG notarization complete"
 
           # 生成 latest-mac.yml
@@ -328,7 +343,11 @@ jobs:
   # ============ 发布阶段 ============
   create-release:
     needs: [prepare, build-mac, build-win, build-linux]
-    if: always() && (needs.build-mac.result == 'success' || needs.build-win.result == 'success' || needs.build-linux.result == 'success')
+    if: >-
+      always() &&
+      !contains(needs.*.result, 'failure') &&
+      !contains(needs.*.result, 'cancelled') &&
+      (needs.build-mac.result == 'success' || needs.build-win.result == 'success' || needs.build-linux.result == 'success')
     runs-on: ubuntu-latest
     steps:
       - name: Download all artifacts
