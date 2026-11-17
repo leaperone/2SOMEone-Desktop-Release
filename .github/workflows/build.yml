@@ -385,6 +385,74 @@ jobs:
         with:
           path: artifacts
 
+      - name: Generate update metadata
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+          BUILD_WIN: ${{ needs.prepare.outputs.build_win }}
+          BUILD_LINUX: ${{ needs.prepare.outputs.build_linux }}
+        run: |
+          python3 - <<'PY'
+          import base64
+          from datetime import datetime, timezone
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+          import re
+
+          version = os.environ["VERSION"]
+          if not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?", version):
+              raise SystemExit("Invalid version for update metadata")
+          for flag in ("BUILD_WIN", "BUILD_LINUX"):
+              if os.environ[flag] not in ("true", "false"):
+                  raise SystemExit(f"Invalid {flag}")
+
+          release_date = datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+          for platform, flag, filename, feed in (
+              ("win", "BUILD_WIN", f"2SOMEone-Desktop-Setup-{version}.exe", "latest.yml"),
+              ("linux", "BUILD_LINUX", f"2SOMEone-Desktop-{version}-x86_64.AppImage", "latest-linux.yml"),
+          ):
+              if os.environ[flag] != "true":
+                  continue
+              artifact = Path("artifacts") / f"{platform}-builds" / filename
+              if not artifact.is_file() or artifact.stat().st_size == 0:
+                  raise SystemExit(f"Missing or empty update artifact: {artifact}")
+              digest = hashlib.sha512()
+              with artifact.open("rb") as stream:
+                  for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                      digest.update(chunk)
+              sha512 = base64.b64encode(digest.digest()).decode("ascii")
+              metadata = {
+                  "version": version,
+                  "files": [{"url": filename, "sha512": sha512, "size": artifact.stat().st_size}],
+                  "path": filename,
+                  "sha512": sha512,
+                  "releaseDate": release_date,
+              }
+              (artifact.parent / feed).write_text(json.dumps(metadata, indent=2) + "\n", encoding="utf-8")
+          PY
+
+      - name: Upload update metadata to release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+          BUILD_MAC: ${{ needs.prepare.outputs.build_mac }}
+          BUILD_WIN: ${{ needs.prepare.outputs.build_win }}
+          BUILD_LINUX: ${{ needs.prepare.outputs.build_linux }}
+        run: |
+          for flag in "$BUILD_MAC" "$BUILD_WIN" "$BUILD_LINUX"; do
+            [[ "$flag" == "true" || "$flag" == "false" ]] || { echo "Invalid build flag"; exit 1; }
+          done
+          feeds=()
+          if [ "$BUILD_MAC" = "true" ]; then feeds+=(artifacts/mac-builds/latest-mac.yml); fi
+          if [ "$BUILD_WIN" = "true" ]; then feeds+=(artifacts/win-builds/latest.yml); fi
+          if [ "$BUILD_LINUX" = "true" ]; then feeds+=(artifacts/linux-builds/latest-linux.yml); fi
+          [ "${#feeds[@]}" -gt 0 ] || { echo "No requested update metadata"; exit 1; }
+          for feed in "${feeds[@]}"; do
+            [ -s "$feed" ] || { echo "Missing or empty update metadata: $feed"; exit 1; }
+          done
+          gh release upload "desktop-v$VERSION" "${feeds[@]}" --repo "$GITHUB_REPOSITORY" --clobber
+
       - name: List files to upload
         run: find artifacts -type f
 
@@ -424,35 +492,35 @@ jobs:
           fi
           if [ -n "$MAC_DMG" ]; then
             echo "Creating 2SOMEone-Desktop-mac-latest.dmg from $(basename $MAC_DMG)"
-            aws s3 cp "$MAC_DMG" "s3://$S3_BUCKET/$S3_PATH/2SOMEone-Desktop-mac-latest.dmg" $S3_OPTS
+            aws s3 cp "s3://$S3_BUCKET/$S3_PATH/$(basename "$MAC_DMG")" "s3://$S3_BUCKET/$S3_PATH/2SOMEone-Desktop-mac-latest.dmg" $S3_OPTS
           fi
 
           # macOS - zip (for auto-update)
           MAC_ZIP=$(find artifacts -name "2SOMEone-Desktop-${VERSION}-arm64.zip" -o -name "*-arm64.zip" | head -1)
           if [ -n "$MAC_ZIP" ]; then
             echo "Creating 2SOMEone-Desktop-mac-latest.zip"
-            aws s3 cp "$MAC_ZIP" "s3://$S3_BUCKET/$S3_PATH/2SOMEone-Desktop-mac-latest.zip" $S3_OPTS
+            aws s3 cp "s3://$S3_BUCKET/$S3_PATH/$(basename "$MAC_ZIP")" "s3://$S3_BUCKET/$S3_PATH/2SOMEone-Desktop-mac-latest.zip" $S3_OPTS
           fi
 
           # Windows - exe
           WIN_EXE=$(find artifacts -name "*.exe" | head -1)
           if [ -n "$WIN_EXE" ]; then
             echo "Creating 2SOMEone-Desktop-Setup-latest.exe"
-            aws s3 cp "$WIN_EXE" "s3://$S3_BUCKET/$S3_PATH/2SOMEone-Desktop-Setup-latest.exe" $S3_OPTS
+            aws s3 cp "s3://$S3_BUCKET/$S3_PATH/$(basename "$WIN_EXE")" "s3://$S3_BUCKET/$S3_PATH/2SOMEone-Desktop-Setup-latest.exe" $S3_OPTS
           fi
 
           # Linux - AppImage
           LINUX_APPIMAGE=$(find artifacts -name "*.AppImage" | head -1)
           if [ -n "$LINUX_APPIMAGE" ]; then
             echo "Creating 2SOMEone-Desktop-latest.AppImage"
-            aws s3 cp "$LINUX_APPIMAGE" "s3://$S3_BUCKET/$S3_PATH/2SOMEone-Desktop-latest.AppImage" $S3_OPTS
+            aws s3 cp "s3://$S3_BUCKET/$S3_PATH/$(basename "$LINUX_APPIMAGE")" "s3://$S3_BUCKET/$S3_PATH/2SOMEone-Desktop-latest.AppImage" $S3_OPTS
           fi
 
           # Linux - deb
           LINUX_DEB=$(find artifacts -name "*.deb" | head -1)
           if [ -n "$LINUX_DEB" ]; then
             echo "Creating 2SOMEone-Desktop-latest.deb"
-            aws s3 cp "$LINUX_DEB" "s3://$S3_BUCKET/$S3_PATH/2SOMEone-Desktop-latest.deb" $S3_OPTS
+            aws s3 cp "s3://$S3_BUCKET/$S3_PATH/$(basename "$LINUX_DEB")" "s3://$S3_BUCKET/$S3_PATH/2SOMEone-Desktop-latest.deb" $S3_OPTS
           fi
 
       - name: Cleanup old versions on S3
